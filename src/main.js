@@ -87,9 +87,8 @@ const crawler = new PlaywrightCrawler({
     log.info('Submitting search form...', { fromDate });
     await page.click('#ctl00_cplMain_btnSearch');
 
-   try {
-      await page.waitForSelector(
-        '#ctl00_cplMain_rgSearchRslts table tbody tr',
+   await page.waitForSelector(
+        '.rgMasterTable tbody tr, #ctl00_cplMain_rgSearchRslts table tr',
         { timeout: 30000 }
       );
     } catch {
@@ -158,8 +157,8 @@ const crawler = new PlaywrightCrawler({
 async function extractGridRows(page) {
   return page.evaluate(() => {
     const rows = [];
-    const trEls = document.querySelectorAll(
-      '#ctl00_cplMain_rgSearchRslts table tbody tr'
+   const trEls = document.querySelectorAll(
+      '.rgMasterTable tbody tr'
     );
 
     trEls.forEach((tr, rowIndex) => {
@@ -169,18 +168,18 @@ async function extractGridRows(page) {
       const get = (i) => cells[i]?.textContent?.trim() ?? '';
       const link = tr.querySelector('a[href*="permit"], a[href*="Permit"]');
 
-      rows.push({
+rows.push({
         rowIndex,
-        permitNumber:  get(3),
-        address:       get(1),
-        issuedDate:    get(2),
-        appliedDate:   get(5),
-        permitType:    get(9),
-        permitSubtype: get(10),
-        status:        get(11),
-        description:   get(12),
-        valuation:     parseCurrency(get(13)),
-        contractorName: get(15),
+        permitNumber:  get(0),
+        appliedDate:   get(1),
+        issuedDate:    get(3),
+        permitType:    get(6),
+        permitSubtype: get(7),
+        address:       get(8),
+        status:        get(9),
+        description:   get(10),
+        valuation:     parseCurrency(get(11)),
+        contractorName: get(12),
         detailHref:    link?.href ?? '',
       });
     });
