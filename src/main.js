@@ -18,7 +18,7 @@
  * Works against any eTRAKiT/CentralSquare instance — pass baseUrl as input.
  */
 
-import { Actor } from 'apify';
+import { Actor, KeyValueStore } from 'apify';
 import { PlaywrightCrawler, Dataset, log } from 'crawlee';
 
 await Actor.init();
@@ -87,12 +87,20 @@ const crawler = new PlaywrightCrawler({
     log.info('Submitting search form...', { fromDate });
     await page.click('#ctl00_cplMain_btnSearch');
 
-    try {
+   try {
       await page.waitForSelector(
         '#ctl00_cplMain_rgSearchRslts table tbody tr',
         { timeout: 30000 }
       );
     } catch {
+      // Take a screenshot so we can see what the page looks like
+      await page.screenshot({ path: 'search-result.png', fullPage: true });
+      await Actor.setValue('search-result', await page.screenshot({ fullPage: true }), { contentType: 'image/png' });
+
+      // Also save the page HTML for inspection
+      const html = await page.content();
+      await Actor.setValue('page-html', html, { contentType: 'text/html' });
+
       const noResults = await page.$('#cplMain_lblNoSearchRslts');
       if (noResults) {
         log.info('Portal returned no results for this date range.');
