@@ -1,0 +1,9 @@
+{
+  "actorSpecification": 1,
+  "name": "denver-metro-etrakit",
+  "title": "Denver Metro eTRAKiT Permit Scraper",
+  "version": "0.1",
+  "buildTag": "latest",
+  "input": "../INPUT_SCHEMA.json",
+  "dockerfile": "../Dockerfile"
+}
