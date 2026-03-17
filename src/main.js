@@ -74,11 +74,16 @@ const crawler = new PlaywrightCrawler({
       log.warning('Grid did not load after 30s', { error: e.message });
     }
 
+    // Always save screenshot + HTML so you can inspect what the browser saw
+    // View them in Apify: Storage tab → Key-value store → search-result / page-html
+    const shot = await page.screenshot({ fullPage: true });
+    await Actor.setValue('search-result', shot, { contentType: 'image/png' });
+    const pageHtml = await page.content();
+    await Actor.setValue('page-html', pageHtml, { contentType: 'text/html' });
+    log.info('Saved screenshot and HTML to key-value store (Storage tab).');
+
     if (!gridLoaded) {
-      // Save screenshot for debugging
-      const shot = await page.screenshot({ fullPage: true });
-      await Actor.setValue('debug-screenshot', shot, { contentType: 'image/png' });
-      log.info('Saved debug screenshot to key-value store.');
+      log.info('Grid did not load — check search-result screenshot in Storage tab.');
       return;
     }
 
@@ -91,6 +96,7 @@ const crawler = new PlaywrightCrawler({
 
       const rows = await extractGridRows(page);
       log.info(`Found ${rows.length} rows on page ${pageCount}`);
+      if (rows.length > 0) log.info('First row sample', { r: JSON.stringify(rows[0]) });
 
       for (const row of rows) {
         if (seen.has(row.permitNumber)) continue;
@@ -132,37 +138,43 @@ async function extractGridRows(page) {
   return page.evaluate(() => {
     const rows = [];
 
-    // Use broad selector — catches both rgMasterTable and ID-based variants
     const trEls = document.querySelectorAll(
       '.rgMasterTable tbody tr, #ctl00_cplMain_rgSearchRslts table tbody tr'
     );
 
-    // Deduplicate (both selectors may match same elements)
     const unique = Array.from(new Set(Array.from(trEls)));
 
-    unique.forEach((tr, rowIndex) => {
+    unique.forEach(function(tr, rowIndex) {
       const cells = Array.from(tr.querySelectorAll('td'));
       if (cells.length < 4) return;
 
-      const get = (i) => (cells[i] ? cells[i].textContent.trim() : '');
+      const get = function(i) { return cells[i] ? cells[i].textContent.trim() : ''; };
 
       function parseCurrency(str) {
         if (!str) return 0;
         return parseInt(str.replace(/[^0-9]/g, ''), 10) || 0;
       }
 
+      // Capture every cell as raw text — used by keyword filter
+      const allText = cells.map(function(td) { return td.textContent.trim(); }).join(' | ');
+
+      // Column order confirmed from Arvada screenshot:
+      // 0:PermitNo 1:Applied 2:Approved 3:IssuedDate 4:Finaled 5:Expired
+      // 6:PermitType 7:PermitSubtype — remaining cols vary, capture via allText
       rows.push({
-        rowIndex,
+        rowIndex:       rowIndex,
         permitNumber:   get(0),
         appliedDate:    get(1),
+        approvedDate:   get(2),
         issuedDate:     get(3),
         permitType:     get(6),
         permitSubtype:  get(7),
-        address:        get(8),
-        status:         get(9),
-        description:    get(10),
-        valuation:      parseCurrency(get(11)),
-        contractorName: get(12),
+        status:         get(8),
+        description:    get(9),
+        valuation:      parseCurrency(get(10)),
+        contractorName: get(11),
+        address:        get(12),
+        _allText:       allText,
       });
     });
 
@@ -253,6 +265,8 @@ async function clickNextPage(page) {
 function matchesKeyword(row, keyword) {
   if (!keyword || keyword.trim() === '') return true;
   const kw = keyword.trim().toUpperCase();
+  // _allText contains every cell joined — catches any column regardless of index
+  if (row._allText && row._allText.toUpperCase().includes(kw)) return true;
   return Object.values(row).some(function(val) {
     return typeof val === 'string' && val.toUpperCase().includes(kw);
   });
