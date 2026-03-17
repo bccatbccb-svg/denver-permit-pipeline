@@ -16,7 +16,7 @@
  */
 
 import { Actor } from 'apify';
-import { PlaywrightCrawler, Dataset, Log } from 'crawlee';
+import { PlaywrightCrawler, Dataset, log } from 'crawlee';
 import { chromium } from 'playwright';
 
 await Actor.init();
@@ -43,7 +43,7 @@ const detailBase = `${baseUrl}/Permit/permit`;
 const fromDate   = daysAgo(daysBack);
 const toDate     = today();
 
-Log.info(`Starting eTRAKiT scrape`, { city: cityName, baseUrl, fromDate, toDate, minValuation });
+log.info(`Starting eTRAKiT scrape`, { city: cityName, baseUrl, fromDate, toDate, minValuation });
 
 // ── Proxy ─────────────────────────────────────────────────────────────────────
 
