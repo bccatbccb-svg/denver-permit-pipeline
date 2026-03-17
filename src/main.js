@@ -419,7 +419,7 @@ function daysAgo(n) {
 
 await crawler.run([{ url: searchUrl, userData: { label: 'SEARCH' } }]);
 
-Log.info(`Scrape complete`, {
+log.info(`Scrape complete`, {
   city:          cityName,
   pagesScraped:  pageCount,
   leadsFound:    hitCount,
