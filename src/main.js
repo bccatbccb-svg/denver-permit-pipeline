@@ -1,24 +1,4 @@
-/**
- * Denver Metro eTRAKiT Permit Scraper
- * ------------------------------------
- * Scrapes eTRAKiT permit portals (CentralSquare/Telerik RadGrid)
- * for custom home and remodel leads.
- *
- * How this portal actually works (confirmed from Arvada HTML):
- *   1. Load /Search/permit.aspx
- *   2. Set dropdown "Search By" to "Issued Date" (field: Permit_Main.ISSUED)
- *   3. Set operator to "AT LEAST" and value to the from-date
- *   4. Click Search → page does an AJAX postback
- *   5. Wait for the Telerik RadGrid (#ctl00_cplMain_rgSearchRslts) to populate
- *   6. Extract rows from the grid table
- *   7. Paginate via the grid next-page button
- *   8. For each matching row, click it to load the detail panel (AJAX)
- *   9. Extract contractor and description from the detail panel
- *
- * Works against any eTRAKiT/CentralSquare instance — pass baseUrl as input.
- */
-
-import { Actor, KeyValueStore } from 'apify';
+import { Actor } from 'apify';
 import { PlaywrightCrawler, Dataset, log } from 'crawlee';
 
 await Actor.init();
@@ -32,11 +12,7 @@ const {
   cityName           = 'Arvada',
   daysBack           = 30,
   minValuation       = 50000,
-  permitTypeKeywords = [
-    'NEW SINGLE FAMILY', 'NEW SFR', 'CUSTOM HOME',
-    'SINGLE FAMILY DETACHED', 'ADDITION', 'REMODEL',
-    'ADU', 'ACCESSORY DWELLING', 'RESIDENTIAL NEW',
-  ],
+  filterKeyword      = '',
   maxPages           = 0,
   proxyConfiguration = { useApifyProxy: true },
 } = input;
@@ -44,7 +20,7 @@ const {
 const searchUrl = `${baseUrl}/Search/permit.aspx`;
 const fromDate  = daysAgo(daysBack);
 
-log.info('Starting eTRAKiT scrape', { city: cityName, baseUrl, fromDate, minValuation });
+log.info('Starting eTRAKiT scrape', { city: cityName, baseUrl, fromDate, minValuation, filterKeyword });
 
 // ── Proxy ─────────────────────────────────────────────────────────────────────
 
@@ -66,50 +42,47 @@ const crawler = new PlaywrightCrawler({
   minConcurrency: 1,
   maxConcurrency: 1,
 
-  async requestHandler({ page, request }) {
+  async requestHandler({ page }) {
 
-    log.info('Loading search page', { url: request.url });
+    log.info('Loading search page', { url: searchUrl });
 
-    // Step 1: Navigate
     await page.goto(searchUrl, { waitUntil: 'networkidle' });
 
-    // Step 2: Set Search By to Issued Date
+    // Set Search By to Issued Date
     await page.selectOption('#cplMain_ddSearchBy', 'Permit_Main.ISSUED');
     await page.waitForLoadState('networkidle');
 
-    // Step 3: Set operator to AT LEAST
+    // Set operator to AT LEAST
     await page.selectOption('#cplMain_ddSearchOper', 'AT LEAST');
 
-    // Step 4: Enter the from-date
+    // Enter from-date
     await page.fill('#cplMain_txtSearchString', fromDate);
 
-    // Step 5: Click Search and wait for AJAX grid
-    log.info('Submitting search form...', { fromDate });
+    // Submit
+    log.info('Submitting search...', { fromDate });
     await page.click('#ctl00_cplMain_btnSearch');
 
-   await page.waitForSelector(
+    // Wait for AJAX grid to load
+    let gridLoaded = false;
+    try {
+      await page.waitForSelector(
         '.rgMasterTable tbody tr, #ctl00_cplMain_rgSearchRslts table tr',
         { timeout: 30000 }
       );
+      gridLoaded = true;
     } catch (e) {
-      // Take a screenshot so we can see what the page looks like
-      await page.screenshot({ path: 'search-result.png', fullPage: true });
-      await Actor.setValue('search-result', await page.screenshot({ fullPage: true }), { contentType: 'image/png' });
+      log.warning('Grid did not load after 30s', { error: e.message });
+    }
 
-      // Also save the page HTML for inspection
-      const html = await page.content();
-      await Actor.setValue('page-html', html, { contentType: 'text/html' });
-
-      const noResults = await page.$('#cplMain_lblNoSearchRslts');
-      if (noResults) {
-        log.info('Portal returned no results for this date range.');
-      } else {
-        log.warning('Grid did not load — page structure may differ.');
-      }
+    if (!gridLoaded) {
+      // Save screenshot for debugging
+      const shot = await page.screenshot({ fullPage: true });
+      await Actor.setValue('debug-screenshot', shot, { contentType: 'image/png' });
+      log.info('Saved debug screenshot to key-value store.');
       return;
     }
 
-    // Step 6: Page through all results
+    // Page through all results
     let hasNextPage = true;
 
     while (hasNextPage) {
@@ -123,7 +96,10 @@ const crawler = new PlaywrightCrawler({
         if (seen.has(row.permitNumber)) continue;
         seen.add(row.permitNumber);
 
-        if (!isTargetPermit(row, permitTypeKeywords)) continue;
+        // Keyword filter — checks every field in the row
+        if (!matchesKeyword(row, filterKeyword)) continue;
+
+        // Valuation filter
         if (minValuation > 0 && row.valuation > 0 && row.valuation < minValuation) continue;
 
         hitCount++;
@@ -131,7 +107,7 @@ const crawler = new PlaywrightCrawler({
         const detail = await clickRowAndGetDetail(page, row.rowIndex);
         const record = toUnifiedSchema(row, cityName, detail, baseUrl);
         await Dataset.pushData(record);
-        log.debug('Saved permit', { permitNumber: row.permitNumber, type: row.permitType });
+        log.info('Saved permit', { permitNumber: row.permitNumber, type: row.permitType });
       }
 
       if (maxPages > 0 && pageCount >= maxPages) {
@@ -144,86 +120,93 @@ const crawler = new PlaywrightCrawler({
   },
 
   failedRequestHandler({ request }) {
-    log.error('Request failed after retries', { url: request.url });
+    log.error('Request failed', { url: request.url });
   },
 });
 
 // ── Grid row extraction ───────────────────────────────────────────────────────
-// Column order confirmed from Arvada viewstate:
-// 0:expand  1:Address  2:Issued  3:PermitNo  4:Subdivision  5:Applied
-// 6:Approved  7:Finaled  8:Expired  9:PermitType  10:Subtype  11:Status
-// 12:Description  13:JobValue  14:CO Issued  15:ContractorName
+// Columns from screenshot: PermitNumber | Applied | Approved | IssuedDate |
+// Finaled | Expired | PermitType | PermitSubtype | Address | Status | ...
 
 async function extractGridRows(page) {
   return page.evaluate(() => {
     const rows = [];
-   const trEls = document.querySelectorAll(
-      '.rgMasterTable tbody tr'
+
+    // Use broad selector — catches both rgMasterTable and ID-based variants
+    const trEls = document.querySelectorAll(
+      '.rgMasterTable tbody tr, #ctl00_cplMain_rgSearchRslts table tbody tr'
     );
 
-    trEls.forEach((tr, rowIndex) => {
+    // Deduplicate (both selectors may match same elements)
+    const unique = Array.from(new Set(Array.from(trEls)));
+
+    unique.forEach((tr, rowIndex) => {
       const cells = Array.from(tr.querySelectorAll('td'));
       if (cells.length < 4) return;
 
-      const get = (i) => cells[i]?.textContent?.trim() ?? '';
-      const link = tr.querySelector('a[href*="permit"], a[href*="Permit"]');
+      const get = (i) => (cells[i] ? cells[i].textContent.trim() : '');
 
-rows.push({
+      function parseCurrency(str) {
+        if (!str) return 0;
+        return parseInt(str.replace(/[^0-9]/g, ''), 10) || 0;
+      }
+
+      rows.push({
         rowIndex,
-        permitNumber:  get(0),
-        appliedDate:   get(1),
-        issuedDate:    get(3),
-        permitType:    get(6),
-        permitSubtype: get(7),
-        address:       get(8),
-        status:        get(9),
-        description:   get(10),
-        valuation:     parseCurrency(get(11)),
+        permitNumber:   get(0),
+        appliedDate:    get(1),
+        issuedDate:     get(3),
+        permitType:     get(6),
+        permitSubtype:  get(7),
+        address:        get(8),
+        status:         get(9),
+        description:    get(10),
+        valuation:      parseCurrency(get(11)),
         contractorName: get(12),
-        detailHref:    link?.href ?? '',
       });
     });
 
     return rows;
-
-    function parseCurrency(str) {
-      if (!str) return 0;
-      return parseInt(str.replace(/[^0-9]/g, ''), 10) || 0;
-    }
   });
 }
 
-// ── Detail panel extraction ───────────────────────────────────────────────────
+// ── Detail panel ─────────────────────────────────────────────────────────────
 
 async function clickRowAndGetDetail(page, rowIndex) {
   try {
-    const rows = await page.$$('#ctl00_cplMain_rgSearchRslts table tbody tr');
+    const rows = await page.$$(
+      '.rgMasterTable tbody tr, #ctl00_cplMain_rgSearchRslts table tbody tr'
+    );
     if (!rows[rowIndex]) return null;
 
     await rows[rowIndex].click();
 
-    await page.waitForSelector(
-      '#cplMain_RadPageViewPermitInfo, #cplMain_UpdatePanelDetail',
-      { timeout: 10000 }
-    ).catch(() => {});
+    try {
+      await page.waitForSelector(
+        '#cplMain_RadPageViewPermitInfo, #cplMain_UpdatePanelDetail',
+        { timeout: 10000 }
+      );
+    } catch (e) {
+      log.debug('Detail panel timeout', { rowIndex });
+    }
 
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(800);
 
     return page.evaluate(() => {
-      const getLabelValue = (labelText) => {
-        const allEls = document.querySelectorAll('span, td, label, div');
-        for (const el of allEls) {
+      function getLabelValue(labelText) {
+        const els = document.querySelectorAll('span, td, label, div');
+        for (const el of els) {
           if (el.textContent.trim().toLowerCase().includes(labelText.toLowerCase())) {
             const next = el.nextElementSibling;
-            if (next?.textContent?.trim()) return next.textContent.trim();
+            if (next && next.textContent.trim()) return next.textContent.trim();
             const parentCell = el.closest('td');
-            if (parentCell?.nextElementSibling?.textContent?.trim()) {
+            if (parentCell && parentCell.nextElementSibling && parentCell.nextElementSibling.textContent.trim()) {
               return parentCell.nextElementSibling.textContent.trim();
             }
           }
         }
         return '';
-      };
+      }
 
       return {
         contractorName:    getLabelValue('contractor'),
@@ -235,7 +218,7 @@ async function clickRowAndGetDetail(page, rowIndex) {
       };
     });
   } catch (err) {
-    log.debug('Could not load detail panel', { rowIndex, err: err.message });
+    log.debug('Detail panel error', { rowIndex, error: err.message });
     return null;
   }
 }
@@ -245,66 +228,67 @@ async function clickRowAndGetDetail(page, rowIndex) {
 async function clickNextPage(page) {
   try {
     const nextBtn = await page.$(
-      '.rgPageNext:not(.rgDisabled), ' +
-      'a[title="Next Page"]:not(.rgDisabled), ' +
-      '.t-arrow-next:not(.t-state-disabled)'
+      '.rgPageNext:not(.rgDisabled), a[title="Next Page"]:not(.rgDisabled)'
     );
     if (!nextBtn) return false;
 
-    const isDisabled = await nextBtn.evaluate(
-      el => el.classList.contains('rgDisabled') ||
-            el.classList.contains('t-state-disabled') ||
-            el.getAttribute('disabled') !== null
-    );
+    const isDisabled = await nextBtn.evaluate(function(el) {
+      return el.classList.contains('rgDisabled') || el.getAttribute('disabled') !== null;
+    });
     if (isDisabled) return false;
 
     await nextBtn.click();
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(800);
     return true;
-  } catch (e) {
+  } catch (err) {
+    log.debug('Pagination error', { error: err.message });
     return false;
   }
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Keyword filter ────────────────────────────────────────────────────────────
+// Scans every field in the row — doesn't matter which column the keyword is in
 
-function isTargetPermit(row, keywords) {
-  const type = (row.permitType    || '').toUpperCase();
-  const sub  = (row.permitSubtype || '').toUpperCase();
-  const desc = (row.description   || '').toLowerCase();
-  return keywords.some(kw => {
-    const k = kw.toUpperCase();
-    return type.includes(k) || sub.includes(k) || desc.includes(kw.toLowerCase());
+function matchesKeyword(row, keyword) {
+  if (!keyword || keyword.trim() === '') return true;
+  const kw = keyword.trim().toUpperCase();
+  return Object.values(row).some(function(val) {
+    return typeof val === 'string' && val.toUpperCase().includes(kw);
   });
 }
+
+// ── Schema ────────────────────────────────────────────────────────────────────
 
 function toUnifiedSchema(row, cityName, detail, baseUrl) {
   return {
     source_city:        cityName,
     source_system:      'eTRAKiT',
-    permit_number:      row.permitNumber       ?? '',
-    permit_type:        row.permitType         ?? '',
-    status:             row.status             ?? '',
-    issued_date:        row.issuedDate         ?? '',
-    applied_date:       row.appliedDate        ?? '',
-    address:            row.address            ?? '',
+    permit_number:      row.permitNumber              || '',
+    permit_type:        row.permitType                || '',
+    permit_subtype:     row.permitSubtype             || '',
+    status:             row.status                    || '',
+    issued_date:        row.issuedDate                || '',
+    applied_date:       row.appliedDate               || '',
+    address:            row.address                   || '',
     city:               cityName,
     state:              'CO',
-    zip:                extractZip(row.address ?? ''),
-    contractor_name:    detail?.contractorName    || row.contractorName || '',
-    contractor_license: detail?.contractorLicense ?? '',
-    contractor_phone:   detail?.contractorPhone   ?? '',
-    owner_name:         detail?.ownerName         ?? '',
-    work_description:   detail?.workDescription   || row.description   || '',
-    valuation:          row.valuation             ?? 0,
-    sqft:               detail?.sqft              ?? 0,
+    zip:                extractZip(row.address        || ''),
+    contractor_name:    (detail && detail.contractorName)    || row.contractorName || '',
+    contractor_license: (detail && detail.contractorLicense) || '',
+    contractor_phone:   (detail && detail.contractorPhone)   || '',
+    owner_name:         (detail && detail.ownerName)         || '',
+    work_description:   (detail && detail.workDescription)   || row.description || '',
+    valuation:          row.valuation                 || 0,
+    sqft:               (detail && detail.sqft)       || 0,
     lat:                '',
     lng:                '',
-    portal_url:         row.detailHref || `${baseUrl}/Search/permit.aspx`,
+    portal_url:         baseUrl + '/Search/permit.aspx',
     scraped_at:         new Date().toISOString(),
   };
 }
+
+// ── Utilities ─────────────────────────────────────────────────────────────────
 
 function extractZip(address) {
   const match = address.match(/\b(\d{5})\b/);
@@ -314,19 +298,13 @@ function extractZip(address) {
 function daysAgo(n) {
   const d = new Date();
   d.setDate(d.getDate() - n);
-  return d.toLocaleDateString('en-US', {
-    month: '2-digit', day: '2-digit', year: 'numeric',
-  });
+  return d.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
 }
 
 // ── Run ───────────────────────────────────────────────────────────────────────
 
 await crawler.run([{ url: searchUrl }]);
 
-log.info('Scrape complete', {
-  city:         cityName,
-  pagesScraped: pageCount,
-  leadsFound:   hitCount,
-});
+log.info('Scrape complete', { city: cityName, pagesScraped: pageCount, leadsFound: hitCount });
 
 await Actor.exit();
