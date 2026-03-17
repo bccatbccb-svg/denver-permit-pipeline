@@ -1,0 +1,9 @@
+# These are files Git should ignore and NOT upload to GitHub.
+# node_modules is a huge folder of dependencies — Apify installs these itself.
+# storage contains local test output — no need to share that.
+
+node_modules/
+storage/
+.env
+*.log
+.DS_Store

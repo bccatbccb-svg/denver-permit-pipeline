@@ -1,0 +1,83 @@
+{
+  "title": "Denver Metro eTRAKiT Permit Scraper",
+  "description": "Scrapes eTRAKiT permit portals for custom home builds and remodels. Parameterized by city — change baseUrl to run against any eTRAKiT instance.",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+
+    "baseUrl": {
+      "title": "Portal base URL",
+      "type": "string",
+      "description": "Base URL of the eTRAKiT instance. Do not include trailing slash.",
+      "editor": "textfield",
+      "default": "https://arvadapermits.org/etrakit3",
+      "example": "https://lakw-trk.aspgov.com/eTRAKiT"
+    },
+
+    "cityName": {
+      "title": "City name",
+      "type": "string",
+      "description": "Human-readable city name — written into every output record as source_city.",
+      "editor": "textfield",
+      "default": "Arvada"
+    },
+
+    "daysBack": {
+      "title": "Days back",
+      "type": "integer",
+      "description": "How many days back to look for issued permits.",
+      "editor": "number",
+      "default": 30,
+      "minimum": 1,
+      "maximum": 365
+    },
+
+    "minValuation": {
+      "title": "Minimum valuation ($)",
+      "type": "integer",
+      "description": "Skip permits with a declared valuation below this amount. Use 0 to disable.",
+      "editor": "number",
+      "default": 50000,
+      "minimum": 0
+    },
+
+    "permitTypeKeywords": {
+      "title": "Permit type keywords",
+      "type": "array",
+      "description": "Permit types to target. The scraper checks if the portal's permit type field contains any of these strings (case-insensitive).",
+      "editor": "stringList",
+      "default": [
+        "NEW SINGLE FAMILY",
+        "NEW SFR",
+        "CUSTOM HOME",
+        "SINGLE FAMILY DETACHED",
+        "ADDITION",
+        "REMODEL",
+        "ADU",
+        "ACCESSORY DWELLING"
+      ]
+    },
+
+    "maxPages": {
+      "title": "Max result pages",
+      "type": "integer",
+      "description": "Maximum number of search result pages to process. Use 0 for unlimited.",
+      "editor": "number",
+      "default": 0,
+      "minimum": 0
+    },
+
+    "proxyConfiguration": {
+      "title": "Proxy configuration",
+      "type": "object",
+      "description": "Apify proxy settings. Leave as default for most runs.",
+      "editor": "proxy",
+      "default": {
+        "useApifyProxy": true,
+        "apifyProxyGroups": ["RESIDENTIAL"]
+      }
+    }
+
+  },
+  "required": ["baseUrl", "cityName"]
+}
