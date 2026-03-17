@@ -1,6 +1,6 @@
 {
   "title": "Denver Metro eTRAKiT Permit Scraper",
-  "description": "Scrapes eTRAKiT permit portals for custom home builds and remodels. Parameterized by city — change baseUrl to run against any eTRAKiT instance.",
+  "description": "Scrapes eTRAKiT permit portals for custom home builds and remodels.",
   "type": "object",
   "schemaVersion": 1,
   "properties": {
@@ -8,18 +8,25 @@
     "baseUrl": {
       "title": "Portal base URL",
       "type": "string",
-      "description": "Base URL of the eTRAKiT instance. Do not include trailing slash.",
+      "description": "Base URL of the eTRAKiT instance. No trailing slash.",
       "editor": "textfield",
-      "default": "https://arvadapermits.org/etrakit3",
-      "example": "https://lakw-trk.aspgov.com/eTRAKiT"
+      "default": "https://arvadapermits.org/etrakit3"
     },
 
     "cityName": {
       "title": "City name",
       "type": "string",
-      "description": "Human-readable city name — written into every output record as source_city.",
+      "description": "Written into every output record as source_city.",
       "editor": "textfield",
       "default": "Arvada"
+    },
+
+    "filterKeyword": {
+      "title": "Filter keyword",
+      "type": "string",
+      "description": "Only keep permits where ANY field contains this word. Case-insensitive. Examples: REMODEL, ADDITION, NEW SINGLE FAMILY, ADU. Leave blank to return all permits.",
+      "editor": "textfield",
+      "default": "REMODEL"
     },
 
     "daysBack": {
@@ -35,33 +42,16 @@
     "minValuation": {
       "title": "Minimum valuation ($)",
       "type": "integer",
-      "description": "Skip permits with a declared valuation below this amount. Use 0 to disable.",
+      "description": "Skip permits below this value. Set to 0 to disable.",
       "editor": "number",
       "default": 50000,
       "minimum": 0
     },
 
-    "permitTypeKeywords": {
-      "title": "Permit type keywords",
-      "type": "array",
-      "description": "Permit types to target. The scraper checks if the portal's permit type field contains any of these strings (case-insensitive).",
-      "editor": "stringList",
-      "default": [
-        "NEW SINGLE FAMILY",
-        "NEW SFR",
-        "CUSTOM HOME",
-        "SINGLE FAMILY DETACHED",
-        "ADDITION",
-        "REMODEL",
-        "ADU",
-        "ACCESSORY DWELLING"
-      ]
-    },
-
     "maxPages": {
       "title": "Max result pages",
       "type": "integer",
-      "description": "Maximum number of search result pages to process. Use 0 for unlimited.",
+      "description": "Max pages to scrape. Set to 0 for unlimited.",
       "editor": "number",
       "default": 0,
       "minimum": 0
@@ -70,12 +60,9 @@
     "proxyConfiguration": {
       "title": "Proxy configuration",
       "type": "object",
-      "description": "Apify proxy settings. Leave as default for most runs.",
+      "description": "Leave as default for most runs.",
       "editor": "proxy",
-      "default": {
-        "useApifyProxy": true,
-        "apifyProxyGroups": ["RESIDENTIAL"]
-      }
+      "default": { "useApifyProxy": true }
     }
 
   },
