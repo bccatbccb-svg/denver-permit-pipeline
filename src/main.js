@@ -71,10 +71,10 @@ const crawler = new PlaywrightCrawler({
   requestHandlerTimeoutSecs: 60,
   navigationTimeoutSecs:     45,
 
-  // Don't hammer the portal — be polite
+ // Don't hammer the portal — be polite
   minConcurrency: 1,
   maxConcurrency: 2,
-  requestDelay:   800,
+  requestHandlerTimeoutSecs: 60,
 
   async requestHandler({ page, request, enqueueLinks, log }) {
     const { label } = request.userData ?? {};
