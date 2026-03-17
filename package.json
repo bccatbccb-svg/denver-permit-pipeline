@@ -1,0 +1,19 @@
+{
+  "name": "denver-metro-etrakit",
+  "version": "1.0.0",
+  "description": "Scrapes eTRAKiT permit portals across the Denver metro for custom home and remodel leads.",
+  "main": "src/main.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/main.js",
+    "test": "apify run"
+  },
+  "dependencies": {
+    "apify": "^3.2.0",
+    "crawlee": "^3.9.0",
+    "playwright": "^1.44.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
