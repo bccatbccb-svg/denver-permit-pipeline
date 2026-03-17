@@ -91,7 +91,7 @@ const crawler = new PlaywrightCrawler({
         '.rgMasterTable tbody tr, #ctl00_cplMain_rgSearchRslts table tr',
         { timeout: 30000 }
       );
-    } catch {
+    } catch (e) {
       // Take a screenshot so we can see what the page looks like
       await page.screenshot({ path: 'search-result.png', fullPage: true });
       await Actor.setValue('search-result', await page.screenshot({ fullPage: true }), { contentType: 'image/png' });
@@ -262,7 +262,7 @@ async function clickNextPage(page) {
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(1000);
     return true;
-  } catch {
+  } catch (e) {
     return false;
   }
 }
